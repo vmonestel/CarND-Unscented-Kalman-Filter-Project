@@ -54,6 +54,27 @@ UKF::UKF() {
 
   Hint: one or more values initialized above might be wildly off...
   */
+
+  is_initialized_ = false;
+
+  n_x_ = 5;
+
+  lambda_ = 3 - n_x_;
+
+  Xsig_pred_ = MatrixXd(n_x_, 2 * n_x_ + 1);
+
+  n_aug_ = 7;
+
+  int weights_size = 2*n_aug_+1;
+  weights_ = VectorXd(weights_size);
+  double weight_0 = lambda_/(lambda_+n_aug_);
+  weights_(0) = weight_0;
+  for (int i=1; i<weights_size; i++) {
+    double weight = 0.5/(n_aug_+lambda_);
+    weights_(i) = weight;
+  }
+
+  time_us_ = 0.0;
 }
 
 UKF::~UKF() {}
@@ -63,12 +84,69 @@ UKF::~UKF() {}
  * either radar or laser.
  */
 void UKF::ProcessMeasurement(MeasurementPackage meas_package) {
-  /**
-  TODO:
+  /*****************************************************************************
+   *  Initialization
+   ****************************************************************************/
+  if (!is_initialized_) {
+	// first measurement
+	cout << "UKF initialization: " << endl;
 
-  Complete this function! Make sure you switch between lidar and radar
-  measurements.
-  */
+	if (use_radar_ && meas_package.sensor_type_ == MeasurementPackage::RADAR) {
+	  cout << "UKF : RADAR Initial state" << endl;
+
+	  // Get measurements
+	  double rho = meas_package.raw_measurements_[0];
+	  double phi = meas_package.raw_measurements_[1];
+	  double rho_dot = meas_package.raw_measurements_[2];
+
+	  // Convert polar to cartesian for position
+	  double x = rho * cos(phi);
+	  double y = rho * sin(phi);
+
+	  // Calculate velocity
+	  double vx = rho_dot * cos(phi);
+	  double vy = rho_dot * sin(phi);
+      double v = sqrt(vx * vx + vy * vy);
+
+	  // Update initial state of vector x
+      x_ << x, y, v, 0, 0;
+	}
+	else if (use_laser_ && meas_package.sensor_type_ == MeasurementPackage::LASER) {
+      cout << "UKF : LASER Initial state" << endl;
+	  // Initialize state directly from measurements
+      x_ << meas_package.raw_measurements_[0], meas_package.raw_measurements_[1], 0, 0, 0;
+	}
+
+	// Get the first timestamp in seconds
+	time_us_ = meas_package.timestamp_;
+	// Set initialized flag to true
+	is_initialized_ = true;
+	// done initializing, no need to predict or update
+	return;
+  }
+
+  /*****************************************************************************
+   *  Prediction
+   ****************************************************************************/
+
+  // Get the delta t from previous and current timestamps
+  double time_diff = (meas_package.timestamp_ - time_us_) / 1000000.0;
+  time_us_ = meas_package.timestamp_;
+
+  Prediction(time_diff);
+
+  /*****************************************************************************
+   *  Update
+   ****************************************************************************/
+
+  if (use_laser_ && meas_package.sensor_type_ == MeasurementPackage::LASER) {
+    // Laser updates
+    UpdateLidar(meas_package);
+  } else if (use_radar_ && meas_package.sensor_type_ == MeasurementPackage::RADAR) {
+	// Radar updates
+	UpdateRadar(meas_package);
+  }
+
 }
 
 /**
